@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { mockChannels } from "@/data/mockChannels";
-import type { Channel } from "@/types/channel";
+import type { Channel, Platform } from "@/types/channel";
 
 const periodMultiplier: Record<string, number> = {
   "1m": 1,
@@ -14,6 +14,40 @@ const metricKey: Record<string, keyof Channel> = {
   likes: "likes_gain",
 };
 
+const SUPPORTED_PLATFORMS: Platform[] = ["youtube", "tiktok", "instagram"];
+const MAX_CHANNELS_PER_PLATFORM = 100;
+
+const scaleByPeriod = (channel: Channel, multiplier: number): Channel => ({
+  ...channel,
+  subscribers_gain: Math.round(channel.subscribers_gain * multiplier),
+  views_gain: Math.round(channel.views_gain * multiplier),
+  likes_gain: Math.round(channel.likes_gain * multiplier),
+});
+
+const sortByMetric = (key: keyof Channel) => (a: Channel, b: Channel) => {
+  const valueA = a[key];
+  const valueB = b[key];
+  if (typeof valueA === "number" && typeof valueB === "number") {
+    return valueB - valueA;
+  }
+  return String(valueB).localeCompare(String(valueA));
+};
+
+const topChannelsForPlatform = (
+  platform: Platform,
+  multiplier: number,
+  key: keyof Channel
+) =>
+  mockChannels
+    .filter((channel) => channel.platform === platform)
+    .map((channel) => scaleByPeriod(channel, multiplier))
+    .filter((channel) => channel.total_subscribers <= 100000)
+    .sort(sortByMetric(key))
+    .slice(0, MAX_CHANNELS_PER_PLATFORM);
+
+const isPlatform = (value: string): value is Platform =>
+  SUPPORTED_PLATFORMS.includes(value as Platform);
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const platform = searchParams.get("platform");
@@ -23,24 +57,19 @@ export async function GET(request: Request) {
   const multiplier = periodMultiplier[period] ?? 1;
   const key = metricKey[metric] ?? "subscribers_gain";
 
-  const channels = mockChannels
-    .filter((channel) =>
-      platform && platform !== "all" ? channel.platform === platform : true
-    )
-    .map((channel) => ({
-      ...channel,
-      subscribers_gain: Math.round(channel.subscribers_gain * multiplier),
-      views_gain: Math.round(channel.views_gain * multiplier),
-      likes_gain: Math.round(channel.likes_gain * multiplier),
-    }))
-    .filter((channel) => channel.total_subscribers <= 100000)
-    .sort((a, b) => {
-      const valueA = a[key];
-      const valueB = b[key];
-      return typeof valueB === "number" && typeof valueA === "number"
-        ? valueB - valueA
-        : 0;
-    });
+  let channels: Channel[] = [];
+
+  if (platform && platform !== "all") {
+    if (!isPlatform(platform)) {
+      return NextResponse.json({ channels: [] });
+    }
+    channels = topChannelsForPlatform(platform, multiplier, key);
+  } else {
+    const combined = SUPPORTED_PLATFORMS.flatMap((platformName) =>
+      topChannelsForPlatform(platformName, multiplier, key)
+    );
+    channels = combined.sort(sortByMetric(key)).slice(0, MAX_CHANNELS_PER_PLATFORM);
+  }
 
   return NextResponse.json({ channels });
 }

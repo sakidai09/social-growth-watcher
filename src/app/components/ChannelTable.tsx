@@ -88,10 +88,15 @@ export function ChannelTable({ channels, sort, onSortChange }: Props) {
           <tbody className="divide-y divide-slate-100 bg-white text-sm text-slateglass-800">
             {sortedChannels.map((channel) => {
               const platformMeta = platformLabels[channel.platform];
+              const linkProps = {
+                href: channel.url,
+                target: "_blank",
+                rel: "noopener noreferrer",
+              } as const;
               return (
                 <tr key={`${channel.platform}-${channel.url}`} className="hover:bg-slate-50/80">
                   <td className="px-4 py-3">
-                    <a href={channel.url} target="_blank" rel="noreferrer" className="inline-flex">
+                    <a {...linkProps} className="inline-flex">
                       <img
                         src={channel.profile_image}
                         alt={`${channel.name}のプロフィール`}
@@ -100,7 +105,7 @@ export function ChannelTable({ channels, sort, onSortChange }: Props) {
                     </a>
                   </td>
                   <td className="px-4 py-3 font-semibold">
-                    <a href={channel.url} target="_blank" rel="noreferrer" className="text-slateglass-800 hover:underline">
+                    <a {...linkProps} className="text-slateglass-800 hover:underline">
                       {channel.name}
                     </a>
                   </td>
@@ -129,9 +134,7 @@ export function ChannelTable({ channels, sort, onSortChange }: Props) {
                   </td>
                   <td className="px-4 py-3">
                     <a
-                      href={channel.url}
-                      target="_blank"
-                      rel="noreferrer"
+                      {...linkProps}
                       className="truncate text-xs text-slateglass-600 hover:underline"
                     >
                       {channel.url}
