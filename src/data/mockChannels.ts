@@ -1,11 +1,12 @@
 import type { Channel, Platform } from "@/types/channel";
+import { defaultUrlBuilders } from "@/lib/channelUrls";
 
 const CHANNELS_PER_PLATFORM = 120;
 
 type PlatformConfig = {
   platform: Platform;
   prefix: string;
-  baseUrl: string;
+  handlePrefix: string;
   startSubscribers: number;
   subscriberStep: number;
   baseGains: {
@@ -20,7 +21,7 @@ const platformConfigs: PlatformConfig[] = [
   {
     platform: "youtube",
     prefix: "YouTubeフロンティア",
-    baseUrl: "https://www.youtube.com/@sgw_youtube_",
+    handlePrefix: "sgw_youtube_",
     startSubscribers: 18000,
     subscriberStep: 520,
     baseGains: { subscribers: 13500, views: 620000, likes: 42000 },
@@ -30,7 +31,7 @@ const platformConfigs: PlatformConfig[] = [
   {
     platform: "tiktok",
     prefix: "TikTokライザー",
-    baseUrl: "https://www.tiktok.com/@sgw_tiktok_",
+    handlePrefix: "sgw_tiktok_",
     startSubscribers: 14000,
     subscriberStep: 470,
     baseGains: { subscribers: 11800, views: 720000, likes: 56000 },
@@ -40,7 +41,7 @@ const platformConfigs: PlatformConfig[] = [
   {
     platform: "instagram",
     prefix: "Instagramブロッサム",
-    baseUrl: "https://www.instagram.com/sgw_instagram_",
+    handlePrefix: "sgw_instagram_",
     startSubscribers: 10000,
     subscriberStep: 430,
     baseGains: { subscribers: 9800, views: 310000, likes: 64000 },
@@ -58,10 +59,12 @@ const generateChannels = (config: PlatformConfig): Channel[] =>
   Array.from({ length: CHANNELS_PER_PLATFORM }, (_, index) => {
     const position = index + 1;
     const momentum = momentumForIndex(index);
+    const handle = `${config.handlePrefix}${position}`;
 
     return {
       name: `${config.prefix}${String(position).padStart(3, "0")}`,
-      url: `${config.baseUrl}${position}`,
+      handle,
+      url: defaultUrlBuilders[config.platform](handle),
       profile_image: `${config.profileImageBase}&sig=${config.platform}-${position}`,
       total_subscribers: Math.min(
         99000,

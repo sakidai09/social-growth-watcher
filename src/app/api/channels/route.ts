@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { mockChannels } from "@/data/mockChannels";
 import type { Channel, Platform } from "@/types/channel";
+import { resolveChannelUrl } from "@/lib/channelUrls";
 
 const periodMultiplier: Record<string, number> = {
   "1m": 1,
@@ -48,6 +49,26 @@ const topChannelsForPlatform = (
 const isPlatform = (value: string): value is Platform =>
   SUPPORTED_PLATFORMS.includes(value as Platform);
 
+const attachCanonicalUrls = async (channels: Channel[]) =>
+  Promise.all(
+    channels.map(async (channel) => {
+      try {
+        const resolvedUrl = await resolveChannelUrl(
+          channel.platform,
+          channel.handle,
+          channel.url
+        );
+        return { ...channel, url: resolvedUrl };
+      } catch (error) {
+        console.error(
+          `[URL Resolver] ${channel.platform}:${channel.handle} 取得中にエラー`,
+          error
+        );
+        return channel;
+      }
+    })
+  );
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const platform = searchParams.get("platform");
@@ -71,5 +92,6 @@ export async function GET(request: Request) {
     channels = combined.sort(sortByMetric(key)).slice(0, MAX_CHANNELS_PER_PLATFORM);
   }
 
-  return NextResponse.json({ channels });
+  const enrichedChannels = await attachCanonicalUrls(channels);
+  return NextResponse.json({ channels: enrichedChannels });
 }
