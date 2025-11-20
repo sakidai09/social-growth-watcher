@@ -94,7 +94,10 @@ export function ChannelTable({ channels, sort, onSortChange }: Props) {
                 rel: "noopener noreferrer",
               } as const;
               return (
-                <tr key={`${channel.platform}-${channel.url}`} className="hover:bg-slate-50/80">
+                <tr
+                  key={`${channel.platform}-${channel.handle}-${channel.name}`}
+                  className="hover:bg-slate-50/80"
+                >
                   <td className="px-4 py-3">
                     <a {...linkProps} className="inline-flex">
                       <img

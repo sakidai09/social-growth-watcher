@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { mockChannels } from "@/data/mockChannels";
 import type { Channel, Platform } from "@/types/channel";
-import { resolveChannelUrl } from "@/lib/channelUrls";
+import { resolveChannelMetadata } from "@/lib/channelUrls";
 
 const periodMultiplier: Record<string, number> = {
   "1m": 1,
@@ -49,16 +49,21 @@ const topChannelsForPlatform = (
 const isPlatform = (value: string): value is Platform =>
   SUPPORTED_PLATFORMS.includes(value as Platform);
 
-const attachCanonicalUrls = async (channels: Channel[]) =>
+const attachMetadata = async (channels: Channel[]) =>
   Promise.all(
     channels.map(async (channel) => {
       try {
-        const resolvedUrl = await resolveChannelUrl(
+        const metadata = await resolveChannelMetadata(
           channel.platform,
           channel.handle,
-          channel.url
+          channel.url,
+          channel.profile_image
         );
-        return { ...channel, url: resolvedUrl };
+        return {
+          ...channel,
+          url: metadata.url,
+          profile_image: metadata.profileImage,
+        };
       } catch (error) {
         console.error(
           `[URL Resolver] ${channel.platform}:${channel.handle} 取得中にエラー`,
@@ -92,6 +97,6 @@ export async function GET(request: Request) {
     channels = combined.sort(sortByMetric(key)).slice(0, MAX_CHANNELS_PER_PLATFORM);
   }
 
-  const enrichedChannels = await attachCanonicalUrls(channels);
+  const enrichedChannels = await attachMetadata(channels);
   return NextResponse.json({ channels: enrichedChannels });
 }

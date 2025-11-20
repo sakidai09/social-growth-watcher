@@ -3,10 +3,16 @@ import type { Platform } from "@/types/channel";
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36";
 
-const defaultUrlBuilders: Record<Platform, (handle: string) => string> = {
+export const defaultUrlBuilders: Record<Platform, (handle: string) => string> = {
   youtube: (handle) => `https://www.youtube.com/@${handle}`,
   tiktok: (handle) => `https://www.tiktok.com/@${handle}`,
   instagram: (handle) => `https://www.instagram.com/${handle}/`,
+};
+
+export const defaultProfileBuilders: Record<Platform, (handle: string) => string> = {
+  youtube: (handle) => `https://unavatar.io/youtube/${handle}`,
+  tiktok: (handle) => `https://unavatar.io/tiktok/${handle}`,
+  instagram: (handle) => `https://unavatar.io/instagram/${handle}`,
 };
 
 const scrapeTargets: Record<Platform, (handle: string) => string> = {
@@ -15,24 +21,54 @@ const scrapeTargets: Record<Platform, (handle: string) => string> = {
   instagram: (handle) => defaultUrlBuilders.instagram(handle),
 };
 
-const urlCache = new Map<string, string>();
+type ChannelMetadata = {
+  url: string;
+  profileImage: string;
+};
+
+const metadataCache = new Map<string, ChannelMetadata>();
 
 const canonicalFromHtml = (html: string) => {
   const canonicalMatch = html.match(/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i);
-  if (canonicalMatch?.[1]) {
-    return canonicalMatch[1];
-  }
   const ogMatch = html.match(/property=["']og:url["'][^>]+content=["']([^"']+)["']/i);
-  if (ogMatch?.[1]) {
-    return ogMatch[1];
-  }
-  return null;
+  const imageMatch = html.match(/property=["']og:image["'][^>]+content=["']([^"']+)["']/i);
+
+  return {
+    canonical: canonicalMatch?.[1] ?? ogMatch?.[1] ?? null,
+    ogImage: imageMatch?.[1] ?? null,
+  };
 };
 
-const scrapeCanonicalUrl = async (
+const isReachable = async (url: string) => {
+  try {
+    const head = await fetch(url, { method: "HEAD" });
+    if (head.ok || head.status === 405) {
+      return true;
+    }
+    const get = await fetch(url, { method: "GET" });
+    return get.ok;
+  } catch (error) {
+    console.warn(`[URL Resolver] ${url} の到達性確認に失敗: ${(error as Error).message}`);
+    return false;
+  }
+};
+
+const verifyUrlCandidates = async (candidates: string[], prefix: string) => {
+  for (const candidate of candidates) {
+    if (await isReachable(candidate)) {
+      console.info(`[URL Resolver] ${prefix} 到達性確認OK -> ${candidate}`);
+      return candidate;
+    }
+    console.warn(`[URL Resolver] ${prefix} 到達性NG -> ${candidate}`);
+  }
+  return candidates[0];
+};
+
+const scrapeMetadata = async (
   platform: Platform,
-  handle: string
-): Promise<string | null> => {
+  handle: string,
+  defaultProfile: string
+): Promise<ChannelMetadata | null> => {
   const target = scrapeTargets[platform](handle);
   try {
     const response = await fetch(target, { headers: { "User-Agent": USER_AGENT } });
@@ -40,15 +76,18 @@ const scrapeCanonicalUrl = async (
       throw new Error(`HTTP ${response.status}`);
     }
     const html = await response.text();
-    const canonical = canonicalFromHtml(html);
-    if (canonical) {
+    const { canonical, ogImage } = canonicalFromHtml(html);
+    if (canonical || ogImage) {
       console.info(
-        `[URL Resolver] ${platform}:${handle} スクレイピングで取得成功 -> ${canonical}`
+        `[URL Resolver] ${platform}:${handle} スクレイピングで取得成功 -> url:${canonical ?? "(none)"} icon:${ogImage ?? "(none)"}`
       );
-      return canonical;
+      return {
+        url: canonical ?? scrapeTargets[platform](handle),
+        profileImage: ogImage ?? defaultProfile,
+      };
     }
     console.warn(
-      `[URL Resolver] ${platform}:${handle} スクレイピングでcanonical取得できず`
+      `[URL Resolver] ${platform}:${handle} スクレイピングでcanonical/icon取得できず`
     );
     return null;
   } catch (error) {
@@ -59,7 +98,9 @@ const scrapeCanonicalUrl = async (
   }
 };
 
-const fetchYoutubeUrlFromApi = async (handle: string) => {
+type ApiMetadata = { url?: string; profileImage?: string };
+
+const fetchYoutubeUrlFromApi = async (handle: string): Promise<ApiMetadata> => {
   const apiKey = process.env.YOUTUBE_API_KEY;
   if (!apiKey) {
     throw new Error("YOUTUBE_API_KEY が設定されていません");
@@ -96,15 +137,20 @@ const fetchYoutubeUrlFromApi = async (handle: string) => {
   }
   const channelData = await channelResponse.json();
   const customUrl = channelData?.items?.[0]?.snippet?.customUrl;
-  if (customUrl) {
-    return customUrl.startsWith("@")
+  const profileImage =
+    channelData?.items?.[0]?.snippet?.thumbnails?.high?.url ||
+    channelData?.items?.[0]?.snippet?.thumbnails?.default?.url;
+
+  const url = customUrl
+    ? customUrl.startsWith("@")
       ? `https://www.youtube.com/${customUrl}`
-      : `https://www.youtube.com/@${customUrl}`;
-  }
-  return `https://www.youtube.com/channel/${channelId}`;
+      : `https://www.youtube.com/@${customUrl}`
+    : `https://www.youtube.com/channel/${channelId}`;
+
+  return { url, profileImage };
 };
 
-const fetchTikTokUrlFromApi = async (handle: string) => {
+const fetchTikTokUrlFromApi = async (handle: string): Promise<ApiMetadata> => {
   const apiKey = process.env.TIKTOK_API_KEY;
   const apiHost = process.env.TIKTOK_API_HOST;
   const endpoint = process.env.TIKTOK_API_ENDPOINT;
@@ -126,10 +172,12 @@ const fetchTikTokUrlFromApi = async (handle: string) => {
   }
   const data = await response.json();
   const username = data?.data?.user?.uniqueId || data?.user?.uniqueId || handle;
-  return `https://www.tiktok.com/@${username}`;
+  const profileImage =
+    data?.data?.user?.avatarThumb || data?.user?.avatar_thumb || undefined;
+  return { url: `https://www.tiktok.com/@${username}`, profileImage };
 };
 
-const fetchInstagramUrlFromApi = async (handle: string) => {
+const fetchInstagramUrlFromApi = async (handle: string): Promise<ApiMetadata> => {
   const token = process.env.INSTAGRAM_GRAPH_API_TOKEN;
   if (!token) {
     throw new Error("INSTAGRAM_GRAPH_API_TOKEN が設定されていません");
@@ -143,7 +191,13 @@ const fetchInstagramUrlFromApi = async (handle: string) => {
     throw new Error(`Instagram oEmbed API error ${response.status}`);
   }
   const data = await response.json();
-  return data?.author_url || profileUrl;
+  const authorUrl = data?.author_url || profileUrl;
+  const profileImage =
+    data?.thumbnail_url ||
+    (data?.author_url?.includes("instagram.com/")
+      ? `${authorUrl}profile_pic`
+      : undefined);
+  return { url: authorUrl, profileImage };
 };
 
 const fetchChannelUrlFromApi = async (platform: Platform, handle: string) => {
@@ -159,44 +213,94 @@ const fetchChannelUrlFromApi = async (platform: Platform, handle: string) => {
   }
 };
 
-export const resolveChannelUrl = async (
-  platform: Platform,
-  handle: string,
-  fallback?: string
-) => {
-  const cacheKey = `${platform}:${handle}`;
-  if (urlCache.has(cacheKey)) {
-    return urlCache.get(cacheKey)!;
+const reachableCandidates = (platform: Platform, handle: string, base: string) => {
+  const normalized = handle.replace(/^@/, "");
+  switch (platform) {
+    case "youtube":
+      return [
+        base,
+        `https://www.youtube.com/${normalized.startsWith("channel/") ? normalized : `channel/${normalized}`}`,
+        `https://www.youtube.com/user/${normalized}`,
+        `https://www.youtube.com/c/${normalized}`,
+        "https://www.youtube.com/",
+      ];
+    case "tiktok":
+      return [
+        base,
+        `https://m.tiktok.com/@${normalized}`,
+        `https://www.tiktok.com/@${normalized}?lang=ja-JP`,
+        "https://www.tiktok.com/",
+      ];
+    case "instagram":
+      return [
+        base,
+        `https://instagram.com/${normalized}`,
+        `https://www.instagram.com/${normalized}`,
+        "https://www.instagram.com/",
+      ];
+    default:
+      return [base];
   }
-  const normalizedHandle = handle.replace(/^@/, "").trim();
-  const defaultUrl = fallback ?? defaultUrlBuilders[platform](normalizedHandle);
-  const scraped = await scrapeCanonicalUrl(platform, normalizedHandle);
-  if (scraped) {
-    urlCache.set(cacheKey, scraped);
-    return scraped;
-  }
-  console.warn(
-    `[URL Resolver] ${platform}:${normalizedHandle} API方式にフォールバック`
-  );
-  try {
-    const apiUrl = await fetchChannelUrlFromApi(platform, normalizedHandle);
-    if (apiUrl) {
-      console.info(
-        `[URL Resolver] ${platform}:${normalizedHandle} API方式で取得成功 -> ${apiUrl}`
-      );
-      urlCache.set(cacheKey, apiUrl);
-      return apiUrl;
-    }
-  } catch (error) {
-    console.error(
-      `[URL Resolver] ${platform}:${normalizedHandle} API方式失敗: ${(error as Error).message}`
-    );
-  }
-  console.warn(
-    `[URL Resolver] ${platform}:${normalizedHandle} 既定フォーマットURLを使用 -> ${defaultUrl}`
-  );
-  urlCache.set(cacheKey, defaultUrl);
-  return defaultUrl;
 };
 
-export { defaultUrlBuilders };
+const pickProfileImage = async (
+  candidate: string | undefined,
+  fallback: string
+) => {
+  if (candidate && (await isReachable(candidate))) {
+    return candidate;
+  }
+  if (candidate) {
+    console.warn(`[URL Resolver] プロフィール画像到達不可、フォールバック採用 -> ${fallback}`);
+  }
+  return fallback;
+};
+
+export const resolveChannelMetadata = async (
+  platform: Platform,
+  handle: string,
+  fallbackUrl?: string,
+  fallbackProfile?: string
+): Promise<ChannelMetadata> => {
+  const cacheKey = `${platform}:${handle}`;
+  if (metadataCache.has(cacheKey)) {
+    return metadataCache.get(cacheKey)!;
+  }
+
+  const normalizedHandle = handle.replace(/^@/, "").trim();
+  const defaultUrl = fallbackUrl ?? defaultUrlBuilders[platform](normalizedHandle);
+  const defaultProfile =
+    fallbackProfile ?? defaultProfileBuilders[platform](normalizedHandle);
+
+  const scraped = await scrapeMetadata(platform, normalizedHandle, defaultProfile);
+  const apiMetaPrefix = `${platform}:${normalizedHandle}`;
+
+  let apiMeta: ApiMetadata | null = null;
+  if (!scraped) {
+    console.warn(`[URL Resolver] ${apiMetaPrefix} API方式にフォールバック`);
+    try {
+      apiMeta = await fetchChannelUrlFromApi(platform, normalizedHandle);
+      console.info(
+        `[URL Resolver] ${apiMetaPrefix} API方式で取得成功 -> url:${apiMeta?.url ?? "(none)"} icon:${apiMeta?.profileImage ?? "(none)"}`
+      );
+    } catch (error) {
+      console.error(
+        `[URL Resolver] ${apiMetaPrefix} API方式失敗: ${(error as Error).message}`
+      );
+    }
+  }
+
+  const candidateUrl = scraped?.url ?? apiMeta?.url ?? defaultUrl;
+  const profileCandidate = scraped?.profileImage ?? apiMeta?.profileImage;
+
+  const verifiedUrl = await verifyUrlCandidates(
+    reachableCandidates(platform, normalizedHandle, candidateUrl),
+    apiMetaPrefix
+  );
+
+  const profileImage = await pickProfileImage(profileCandidate, defaultProfile);
+
+  const resolved = { url: verifiedUrl, profileImage } satisfies ChannelMetadata;
+  metadataCache.set(cacheKey, resolved);
+  return resolved;
+};

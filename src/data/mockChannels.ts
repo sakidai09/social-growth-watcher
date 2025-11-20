@@ -1,5 +1,5 @@
 import type { Channel, Platform } from "@/types/channel";
-import { defaultUrlBuilders } from "@/lib/channelUrls";
+import { defaultProfileBuilders, defaultUrlBuilders } from "@/lib/channelUrls";
 
 const CHANNELS_PER_PLATFORM = 120;
 
@@ -7,6 +7,7 @@ type PlatformConfig = {
   platform: Platform;
   prefix: string;
   handlePrefix: string;
+  handles?: string[];
   startSubscribers: number;
   subscriberStep: number;
   baseGains: {
@@ -14,7 +15,6 @@ type PlatformConfig = {
     views: number;
     likes: number;
   };
-  profileImageBase: string;
 };
 
 const platformConfigs: PlatformConfig[] = [
@@ -22,31 +22,91 @@ const platformConfigs: PlatformConfig[] = [
     platform: "youtube",
     prefix: "YouTubeフロンティア",
     handlePrefix: "sgw_youtube_",
+    handles: [
+      "Google",
+      "YouTubeJapan",
+      "GoogleDevelopers",
+      "Android",
+      "ChromeDevelopers",
+      "veritasium",
+      "kurzgesagt",
+      "MarquesBrownlee",
+      "LinusTechTips",
+      "TED",
+      "nasajpl",
+      "WIRED",
+      "KurzgesagtInANutshell",
+      "netflix",
+      "Numberphile",
+      "CGPGrey",
+      "MrBeast",
+      "PewDiePie",
+      "CrashCourse",
+      "NatGeo",
+    ],
     startSubscribers: 18000,
     subscriberStep: 520,
     baseGains: { subscribers: 13500, views: 620000, likes: 42000 },
-    profileImageBase:
-      "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=100&q=60",
   },
   {
     platform: "tiktok",
     prefix: "TikTokライザー",
     handlePrefix: "sgw_tiktok_",
+    handles: [
+      "tiktok",
+      "nba",
+      "mlb",
+      "netflix",
+      "espn",
+      "willsmith",
+      "selenagomez",
+      "therock",
+      "marshmello",
+      "justinbieber",
+      "shakira",
+      "arianagrande",
+      "bts_official_bighit",
+      "jlo",
+      "billieeilish",
+      "dualipa",
+      "kyliejenner",
+      "kimberlyloayza",
+      "charlidamelio",
+      "khaby.lame",
+    ],
     startSubscribers: 14000,
     subscriberStep: 470,
     baseGains: { subscribers: 11800, views: 720000, likes: 56000 },
-    profileImageBase:
-      "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=100&q=60",
   },
   {
     platform: "instagram",
     prefix: "Instagramブロッサム",
     handlePrefix: "sgw_instagram_",
+    handles: [
+      "instagram",
+      "natgeo",
+      "nasa",
+      "cristiano",
+      "leomessi",
+      "selenagomez",
+      "kimkardashian",
+      "beyonce",
+      "justinbieber",
+      "nike",
+      "virat.kohli",
+      "therock",
+      "kyliejenner",
+      "zendaya",
+      "champagnepapi",
+      "dualipa",
+      "jlo",
+      "ladygaga",
+      "bts.bighitofficial",
+      "badgalriri",
+    ],
     startSubscribers: 10000,
     subscriberStep: 430,
     baseGains: { subscribers: 9800, views: 310000, likes: 64000 },
-    profileImageBase:
-      "https://images.unsplash.com/photo-1504593811423-6dd665756598?auto=format&fit=crop&w=100&q=60",
   },
 ];
 
@@ -59,13 +119,15 @@ const generateChannels = (config: PlatformConfig): Channel[] =>
   Array.from({ length: CHANNELS_PER_PLATFORM }, (_, index) => {
     const position = index + 1;
     const momentum = momentumForIndex(index);
-    const handle = `${config.handlePrefix}${position}`;
+    const handle =
+      config.handles?.[index % config.handles.length] ??
+      `${config.handlePrefix}${position}`;
 
     return {
       name: `${config.prefix}${String(position).padStart(3, "0")}`,
       handle,
       url: defaultUrlBuilders[config.platform](handle),
-      profile_image: `${config.profileImageBase}&sig=${config.platform}-${position}`,
+      profile_image: defaultProfileBuilders[config.platform](handle),
       total_subscribers: Math.min(
         99000,
         Math.round(config.startSubscribers + index * config.subscriberStep)
